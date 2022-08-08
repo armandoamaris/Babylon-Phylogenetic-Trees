@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+        <title>21E8 Phylogenetic Trees</title>
+
+        <style>
+            html, body {
+                overflow: hidden;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+
+            #renderCanvas {
+                width: 100%;
+                height: 100%;
+                touch-action: none;
+            }
+        </style>
+
+        <script src="https://cdn.babylonjs.com/babylon.js"></script>
+        <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+        <script src="https://code.jquery.com/pep/0.4.3/pep.js"></script>
+        <script src="https://d3js.org/d3.v4.js"></script>
+        <script src="https://cdn.babylonjs.com/gui/babylon.gui.js"></script>  
+    </head>
+
+   <body>
+
+	<canvas id="renderCanvas" touch-action="none"></canvas> <!-- touch-action="none" for best results from PEP -->
+
+	<script>
+        
+    const canvas = document.getElementById("renderCanvas"); // Get the canvas element
+    const engine = new BABYLON.Engine(canvas, true); // Generate the BABYLON 3D engine
+
+        // Add your code here matching the playground format
+    var createScene = function() {
+    var scene = new BABYLON.Scene(engine);
+    var camera = new BABYLON.ArcRotateCamera("Camera",Math.PI/4,Math.PI/4, 4.0, BABYLON.Vector3.Zero(), scene);
+    //camera.mode = camera.ORTHOGRAPHIC_CAMERA;    
+        
+    ///// functions
+        
+      class Graph {
+              constructor(directed = false) {
+                this.directed = directed;
+                this.nodes = [];
+                this.ancestry=[];
+                this.degree_sequence=[];  
+                this.edges =[];
+                this.position=[];  
+              }
+
+              addNode(node) {
+                this.nodes.push(node);
+                this.ancestry.push([]);
+                this.degree_sequence.push([]);  
+              }
+                
+              nodeIndex(node) {
+                var nodeindex=-1;  
+                for(let k=0;k<this.nodes.length;k++){
+                    if(this.nodes[k]==node){
+                        nodeindex=k;
+                    }
+                }  
+               return nodeindex;
+              }    
+
+               addEdge(edge) {
+                    this.edges.push(edge);
+                  } 
+
+                neighbors(node){
+                    var neighs=[];
+                    for(let k=0;k<this.edges.length;k++){
+                        let edge=this.edges[k];
+                        if(edge[0]==node){neighs.push(edge[1]);}
+                        else if(edge[1]==node){neighs.push(edge[0]);}
+                        }
+                    return neighs;
+                    }
+                
+                degree(node){
+                    var node_neighbors=this.neighbors(node);
+                    return node_neighbors.length;
+                }
+            }
+    
+            function vsum(v){
+                s=0
+                for(let k=0;k<v.length;k++){
+                    s=s+v[k];
+                }
+                return s
+            }
+            
+            function enorm(z){
+                //A loop for a general case did not work
+                if (z.length==2){var outnorm=Math.sqrt(z[0]*z[0]+z[1]*z[1]);}
+                else{var outnorm=Math.sqrt(z[0]*z[0]+z[1]*z[1]+z[2]*z[2]);}
+                return outnorm;}
+        
+            function argument(z){
+                var a = z[0];
+                var b = z[1];
+                var theta=-1; //initial value which should not occur
+                if (a > 0 && b > 0)
+                {theta = Math.atan(b/a);}
+                else if (a > 0 && b < 0)
+                {theta = 2*Math.PI-Math.atan(-b/a);}
+                else if (a < 0 && b > 0){
+                    theta = Math.PI-Math.atan(-b/a);}
+                else if (a < 0 && b < 0){
+                    theta = Math.atan(b/a)+Math.PI;}
+                else if (a == 0 && b > 0){
+                    theta = Math.PI/2;}
+                else if (a == 0 && b < 0){
+                    theta = 3*Math.PI/2;}
+                else if (b == 0 && a > 0){
+                    theta = 0;}
+                else if (b == 0 && a < 0){
+                    theta = Math.PI;}
+                else{
+                    theta = 0;}
+                return theta;}
+
+            
+            function dotproduct(v,w){
+                var s=0;
+                for(let k=0;k<v.length;k++){
+                s=s+v[k]*w[k]    
+                }
+              return s;  
+            }
+        
+            function enorm2(z){
+                var d=dotproduct(z,z);
+                var outnorm=Math.sqrt(d)  
+                return outnorm;}
+        
+            function angle(v,w){
+                var ctheta=dotproduct(v,w)/(enorm(v)*enorm(w));
+                var theta= Math.acos(ctheta)
+                return theta;
+            }
+    
+    
+            function add(vector1,vector2){
+                let n=vector1.length;
+                let m=vector2.length;
+                let result=vector1;
+                if(n==m){
+                    for(let k=0;k<n;k++){
+                        result[k]+=vector2[k];}
+                    }else{console.log("error vector do not have same length");}
+                return result;
+            }
+            
+            function scale(lambda,vector1){
+               let n=vector1.length; 
+               let result=vector1;
+                for(let k=0;k<n;k++){
+                        result[k]=lambda*vector1[k];}
+                return result;      
+            }
+            
+            
+            function scaleSequence(lambda,vectorsequence){
+                let newsequence = []
+                for (let k=0;k<vectorsequence.length;k++){
+                    svector =scale(lambda,vectorsequence[k]);
+                    newsequence.push(svector);
+                }
+                return newsequence;
+                }
+            
+            function translate(positions, center){
+                let newPositions = [];
+                for(let i=0;i<positions.length;i++){
+                    newPosition =add(positions[i],center);
+                    newPositions.push(newPosition);}
+                return newPositions;}
+            
+    
+            function mrca(string1,string2){ 
+                let pmrca="";
+                let n=Math.min(string1.length,string2.length)
+                nstring1=string1.substring(0,n);
+                nstring2=string2.substring(0,n);
+                for (let k=0;k<n;k++){
+                    kstring1=nstring1.substring(0,(n-k));
+                    kstring2=nstring2.substring(0,(n-k));
+                    if(kstring1==kstring2){
+                        pmrca=kstring1;
+                        break}}
+                return pmrca;}
+                
+    
+            function issubstring(string1,string2){
+                let iscorrect=false;
+                let n1=string1.length;
+                let n2=string2.length;
+                if (n1<n2){
+                    if(string1==string2.substring(0,n1))
+                                        {iscorrect=true;}}
+                return iscorrect}
+
+    
+            function inFamilyChain(cstring,familyChain){ 
+                let ifm=false;
+                let youngestfm=familyChain[0];
+                for(let k=0;k<familyChain.length;k++){
+                    let s=familyChain[k]; 
+                    if(s.length>youngestfm.length){youngestfm=s;}
+                       }
+                if (issubstring(cstring,youngestfm)==true || issubstring(youngestfm,cstring)==true){
+                    ifm=true;}       
+                return ifm;}
+            
+    
+            function stringFamilyChains(stringSequence){
+                let reducedStringSequence=new Set(stringSequence);
+                let setvalues=reducedStringSequence.values();
+                chains=[[stringSequence[0]]];
+                for(let i=0;i<reducedStringSequence.size;i++){
+                    let s=setvalues.next();
+                    inChains=false;
+                    for(let j=0;j<chains.length;j++){
+                        if(chains[j].indexOf(s.value)!=-1){inChains=true;}else
+                        {
+                            if(inFamilyChain(s.value,chains[j])==true){
+                            chains[j].push(s.value);
+                            inChains=true;}}
+                    }
+                    if(inChains==false){chains.push([s.value])};
+                }; 
+                return chains;}
+            
+            function stringMatrix(m,n) {
+                var result = [];
+                for(var i = 0; i < n; i++) {
+                    result.push(new Array(m).fill(""));
+                }
+                return result;
+            }
+            
+    
+            function mrcaMatrix(stringSequence){ 
+                n=stringSequence.length;
+                let m=stringMatrix(n,n);
+                for(let i=0;i<n;i++){
+                    for (let j=0;j<n;j++){
+                        if (i!=j){
+                            m[i][j]=mrca(stringSequence[i],stringSequence[j]);}}}
+                return m;}
+            
+    
+            function sortStringSequence(sSequence){
+                // it orders strings,in sequence, from larger to smaller and delete redundant strings.
+                let setss=new Set(sSequence);
+                let arrayss=Array.from(setss);
+                let lens=[];
+                for(let k=0;k<arrayss.length;k++){
+                 let s=arrayss[k]; 
+                  
+                 lens.push(s.length);   
+                }
+                var ldict={};
+                for(let i=0;i<lens.length;i++){
+                    ldict[lens[i]]=[];}
+                for(let j=0;j<arrayss.length;j++){
+                    s=arrayss[j];
+                    ldict[s.length].push(s);}
+                
+                var rsequence=[];
+                slens=Object.keys(ldict).sort((a,b)=>b-a);
+                for(let k=0;k<slens.length;k++){
+                    l=slens[k];
+                    rsequence=rsequence.concat(ldict[l]);}
+                return rsequence;}
+    
+    function isEdgeInGraph(G,edge){
+        var answer=false;
+        for(let k=0;k<G.edges.length;k++){
+            var e=G.edges[k];
+            var x0=e[0];
+            var y0=e[1];
+            if(x0==edge[0] && y0==edge[1]){answer=true;}
+        }
+        return answer;
+    }
+    
+    function stringsTree(stringSequence){
+        const G=new Graph();
+        let rsequence= sortStringSequence(stringSequence);   
+        var n=rsequence.length;
+        var amatrix=mrcaMatrix(rsequence);  
+        for (let i1=0;i1<n;i1++){
+            let s=rsequence[i1];
+            G.addNode(s);}
+        for (let i2=0;i2<n;i2++){
+            for (let i3=0;i3<n;i3++){
+                let w2=amatrix[i2];
+                let w23=amatrix[i2][i3];
+                if (G.nodes.includes(w23)==false){
+                    G.addNode(w23);}}}
+        for (let k1=0;k1<n;k1++){
+            var sseq=sortStringSequence(amatrix[k1])
+            let s1=rsequence[k1];
+            let m=sseq.length;
+            for (let k2=0;k2<m;k2++){
+                let s2=sseq[k2];
+                if (isEdgeInGraph(G,[s1,s2])==false && isEdgeInGraph(G,[s2,s1])==false ){
+                    if(s1.length>s2.length){
+                        G.addEdge([s1,s2]);}}
+                s1=s2;}}
+    return G;}
+    
+    function alarger(s1,s2,degree1,degree2){
+    // s_i ancestral sequence associated to a node n_1 with degree degreei+1
+    var s=s1;
+    var m=Math.min(s1.length,s1.length);
+    var nleft1=Math.floor(degree1/2); //number of branches at the left of the node1
+    var nleft2=Math.floor(degree2/2);
+    var s1tilde="0.";
+    var s2tilde="0.";
+    for(let k=0;k<m;k++){
+        var s1tilde=s1tilde.concat(s1[k]);
+        var s2tilde=s2tilde.concat(s2[k]);}
+    var ns1=parseFloat(s1tilde);
+    var ns2=parseFloat(s2tilde);
+    if (ns1>ns2){s=s1;}
+    else if (ns1<ns2)
+        {s=s2;}
+    else if (ns1==ns2 && n1>n2)
+        {if (s1[m]<=nleft2-1){s=s2;}else{s=s1;}}
+    else if(ns1==ns2 && n1<n2)
+        {if (s2[m]<=nleft1-1){s=s2}
+            else {s=s1}}  
+    return s;}
+    
+    
+   
+        function stratify(T){
+  var children, innodes, lastStrata, strata, stratification;
+  innodes = [""];
+  stratification = [[""]];
+  lastStrata = [""];
+  strata = [];
+
+  while (lastStrata.length !== 0) {
+    for (var node, _pj_c = 0, _pj_a = lastStrata, _pj_b = _pj_a.length; _pj_c < _pj_b; _pj_c += 1) {
+      node = _pj_a[_pj_c];
+      children = findChildren(node, T);
+
+      if (children.length !== 0) {
+        for (var child, _pj_f = 0, _pj_d = children, _pj_e = _pj_d.length; _pj_f < _pj_e; _pj_f += 1) {
+          child = _pj_d[_pj_f];
+          strata.push(child);
+          innodes.push(child);
+        }
+      }
+    }
+
+    if (strata.length !== 0) {
+      stratification.push(strata);
+    }
+
+    lastStrata = strata;
+    strata = [];
+  }
+
+  return stratification;
+}
+  
+
+    
+    function findChildren(node,T){
+    var children=[];
+    var neighbors=T.neighbors(node);
+        if (node!=""){
+    for (let i=0;i<neighbors.length;i++){
+        var nei=neighbors[i]; 
+        if(issubstring(node,nei)==true){
+            children.push(nei);}
+        }
+    }
+    else{children=neighbors;}       
+    return children;}
+    
+ function setupAncestry(T){
+        var stratification=stratify(T);
+        for (let k=0;k<T.nodes.length;k++){ 
+            T.ancestry[k].push(0);
+            T.degree_sequence[k].push(T.degree(""));}
+        for(let k=0;k<stratification.length-1;k++){
+            for(let i=0;i<stratification[k].length;i++){
+                let p=stratification[k][i];
+                var pchildren=findChildren(p,T);
+                for(let r=0;r<pchildren.length;r++){
+                    let child=pchildren[r];
+                    T.ancestry[T.nodeIndex(child)]= T.ancestry[T.nodeIndex(p)].map((x)=>x);
+                    T.ancestry[T.nodeIndex(child)].push(r);
+                    T.degree_sequence[T.nodeIndex(child)]= T.degree_sequence[T.nodeIndex(p)].map((x)=>x);
+                    T.degree_sequence[T.nodeIndex(child)].push(T.degree(child));
+                }
+            }
+        }
+    return T;}
+    
+    function get_ancestral_sequences_and_degrees(T){
+        var ancestralSequences=[];
+        var degrees=[];
+        for(let node=0;node<T.nodes.length;node++){
+            ancestralSequences.push(T.ancestry[node]);
+            degrees.push(T.degree_sequence[node]);
+            }
+        return [ancestralSequences,degrees];}
+
+
+    function sequenceNumber(asequence,degrees){
+        var sn=asequence[1];
+        for(let k=1;k<asequence.length;k++){
+            if (degrees[k-1]>2){
+                var nleft=Math.floor((degrees[k-1]-1)/2);
+                var pk=1/(Math.pow(2,k)*degrees[k-1]);
+                if (asequence[k]<nleft){
+                    sn=sn-(nleft-asequence[k])*pk;
+                }
+                else
+                {sn=sn+(asequence[k]-nleft+1)*pk;
+                }
+            }
+        }
+    return sn;}
+    
+    function orderedAncestralChains(asequence_degrees){
+    var asequence=asequence_degrees[0];
+    var degrees=asequence_degrees[1];    
+    var osequence=[];
+    var snd={} //sequence_number->sequence
+    for(let k=0;k<asequence.length;k++){
+        var sn=sequenceNumber(asequence[k],degrees[k]);
+        if (Object.keys(snd).includes(sn)==false)
+        {snd[sn]=[asequence[k]];}
+        else
+        {snd[sn].push(asequence[k]);
+        }
+    }
+    var osnd=Object.keys(snd);
+    osnd.sort((a, b) => a - b);    
+    for (let i=0;i<osnd.length;i++){
+        osequence.push(snd[osnd[i]]);}
+    return osequence;}
+        
+    function linspace(a,b,n){
+        var af=parseFloat(a);
+        var bf=parseFloat(b);
+        var nf=parseFloat(n);
+        var delta=(bf-af)/nf;
+        var linsequence=[];
+        for(let k=0;k<=n;k++){
+            linsequence.push(af+delta*k); 
+        }   
+    return linsequence;}
+        
+        
+
+
+function orderedAncestralChains2(asequence_degrees){
+    var asequence=asequence_degrees[0];
+    var degrees=asequence_degrees[1];
+    var osequence=[];
+    var snd={}; 
+    for(let k=0;k<asequence.length;k++){
+        var sn=sequenceNumber(asequence[k],degrees[k]);
+        if (snd.hasOwnProperty(sn)==false)
+        {snd[sn]=asequence[k];}
+        else
+        {snd[sn].push(asequence[k]);}
+    }
+    var osnd=Object.keys(snd).sort((a,b)=>a-b); 
+    for(let k=0;k<osnd.length;k++){
+        osequence.push(snd[osnd[k]]);}
+    return osequence;} 
+      
+
+        
+function minNonZeroLen(s){
+    var mnzl=0;
+    for (let k=0;k<s.length;k++){
+        if (s[k]!=0 && k>mnzl){
+            mnzl=k;
+            }
+        }
+    return mnzl+1;}        
+        
+function nodeOrder(T,Tchains,orderedAncestries,node){
+    var order=-1;
+    var nodeAncestry=T.ancestry[T.nodeIndex(node)];
+    for (let i=0;i<orderedAncestries.length;i++){
+        oc=orderedAncestries[i];
+        if (oc.length>=nodeAncestry.length){
+            if (JSON.stringify(oc.slice(0,minNonZeroLen(oc)))==JSON.stringify(nodeAncestry.slice(0,minNonZeroLen(nodeAncestry)))){
+                order=i;}
+        }
+    }
+    return order;}
+        
+function issublist(list1,list2){
+    var answer=false;
+    if (list1.length<=list2.length && JSON.stringify(list1)==JSON.stringify(list2.slice(0,list1.length))){
+        answer=true;}
+    return answer;}
+
+
+function petals(T,stem,receptable){
+    var output=[];
+    var Nei=T.neighbors(receptable);
+    for(let k=0;k<Nei.length;k++){
+        var neighbor=Nei[k];    
+        if (neighbor!=stem){
+            output.push(neighbor);}
+        } 
+    return output;}        
+        
+
+        
+function getChains(T){
+    var chains=[];
+    var counter=1;
+    for (let k=0;k<T.neighbors("").length;k++){
+        var node=T.neighbors("")[k];
+        chains.push(["",node]);
+        counter+=1;}
+     while (counter<T.nodes.length){
+        for (let i=0;i<chains.length;i++){
+            var c=chains[i];
+            var node1=c[c.length-1];
+            var node0=c[c.length-2];
+            var cpetals=petals(T,node0,node1);
+            if (cpetals.length==1){
+                c.push(cpetals[0]);
+                counter+=1}
+            if (cpetals.length>1){
+                for(let j=0;j<cpetals.length;j++){
+                   var petal=cpetals[j];
+                    var newchain=[node1,petal]
+                    var addchain=true;
+                    for (let i=0;i<chains.length;i++){
+                        var chain=chains[i];
+                        if (issublist(newchain,chain)==true)
+                        {addchain=false;
+                        }
+
+                    }
+                    if (addchain==true){
+                        chains.push(newchain);
+                        counter+=1;}
+                  } 
+                }
+           }
+    }
+    return chains;}        
+
+        ;
+
+        
+function addCoordinates3(T,Tchains,orderedAncestry,innerRadius,outerRadius,minAngle,maxAngle){
+    var angles=linspace(minAngle,maxAngle,Tchains.length);
+    var maxAncestralLength=1;
+    //T.position[T.nodeIndex("")]=[0,0,0];
+    for (let k=0;k<T.nodes.length;k++){
+        var nl=T.ancestry[k];
+        if (T.ancestry[k].length>maxAncestralLength){maxAncestralLength=T.ancestry[k].length;
+         }
+    }
+    var levels=linspace(innerRadius,outerRadius,maxAncestralLength);
+    for (let k=0;k<T.nodes.length;k++){
+        var node=T.nodes[k];
+        if ( node!=""){
+        var ancestry=T.ancestry[T.nodeIndex(node)];
+        var level=levels[ancestry.length-1];
+        var theta=angles[nodeOrder(T,Tchains,orderedAncestry,node)];  
+        var nodepos=[level*Math.cos(theta),level*Math.sin(theta),0];   
+        T.position[T.nodeIndex(node)]=nodepos;}
+        else{
+            T.position[T.nodeIndex("")]=[0,0,0];
+            //T.position[T.nodeIndex(node)]=nodepos;
+        }
+        }
+    return T;}       
+          
+    function get_chain_and_fork_positions(T,Tchains,centerRadius){
+        var infork=[];
+        var chainPositions=[];
+        for (let k=0;k<Tchains.length;k++){chainPositions.push([]);}
+        var forkPositions=[];
+        var forkNeighborsPositions=[];
+        for (let i=0;i<T.nodes.length;i++){
+            let node=T.nodes[i];
+            let position=T.position[i];
+            let ancestry=T.ancestry[i];
+            let r=0;
+            for (let j=0;j<Tchains.length;j++){
+                if (Tchains[j].includes(ancestry)==true){
+                    if (position!=[0,0]){
+                        r=(centerRadius+enorm(position))/enorm(position);}
+                else{
+                    r=0;}
+                let position2=[r*position[0],r*position[1]];
+                chainPositions[j].push(position2);
+                break;    
+                    }
+            }
+            var ndegree=T.degree(node);        
+            if (ndegree>=3 && node!="")
+               {
+                var fork=[];
+                var forkNeighbors=[];
+                var R=enorm(T.position[i])+centerRadius;
+                var neighbors=T.neighbors(node); 
+                for (let s=0;s<neighbors.length;s++)
+                    {
+                        var neighbor=neighbors[s];
+                        var neipos=T.position[T.nodeIndex(neighbor)];
+                        if (enorm(neipos)!=0){
+                            let r2=[centerRadius+enorm(neipos)]/enorm(neipos);
+                            var neipos2=[r2*neipos[0],r2*neipos[1]];}
+                        if (infork.includes(neighbor)==false && neighbor!="")
+                            {
+                                let r=R/enorm(neipos);
+                                var newforkpos=[r*neipos[0],r*neipos[1]];
+                                fork.push(newforkpos);
+                                forkNeighbors.push(neipos2);
+                                infork.push(newforkpos);
+                            }
+                    }
+                forkPositions.push(fork);
+                forkNeighborsPositions.push(forkNeighbors); 
+                }
+            else if (ndegree>=2 && node=="")
+                {
+                    fork=[];
+                    forkNeighbors=[];
+                    neighbors=T.neighbors(i);
+                    for (let s=0;s<neighbors.length;s++){
+                        neighbor=neighbors[s];
+                        if (infork.includes(neighbor)==false){
+                            neipos=T.position[T.nodeIndex(neighbor)];}
+                        if (enorm(neipos)!=0){
+                            let r=centerRadius/enorm(neipos);
+                            let newforkpos=[r*neipos[0],r*neipos[1]];
+                            fork.push(newforkpos);
+                            r2=(centerRadius+enorm(neipos))/enorm(neipos);
+                            neipos2=[r2*neipos[0],r2*neipos[1]];
+                            forkNeighbors.push(neipos2);
+                            infork.push(newforkpos);
+                        }
+                    }
+                    if(fork.length>0){
+                    forkPositions.push(fork);
+                    forkNeighborsPositions.push(forkNeighbors);}
+                    }
+            }
+        return [chainPositions,forkPositions,forkNeighborsPositions];}
+        
+function fchainPositions(T,chains){
+    var chainpositions=[];
+    for(let k=0;k<chains.length;k++){chainpositions.push([]);}
+    for(let i=0;i<chains.length;i++) { 
+        for(let j=0;j<chains[i].length;j++){
+            var position=T.position[T.nodeIndex(chains[i][j])];
+            if (j==0){
+               var q=T.position[T.nodeIndex(chains[i][1])];
+                var nfactor=enorm(position)/enorm(q);
+               position=[nfactor*q[0],nfactor*q[1],0];
+               chainpositions[i].push(position);    
+            }
+            else{chainpositions[i].push(position);}
+        }
+    }
+    return chainpositions;}        
+
+function orderedPositions(positions){
+    var sortedPositions=[];
+    var positionD=new Object;
+    for(let k=0;k<positions.length;k++){
+        var position=positions[k];
+        var theta=argument(position);
+        positionD[theta]=position;
+    }
+    var angles=Object.keys(positionD);
+    angles.sort((a,b)=>b-a);
+    for(let i=0;i<angles.length;i++){
+        var beta=angles[i];
+        sortedPositions.push(positionD[beta]);
+    }
+    return sortedPositions;
+}        
+
+function fforkPositions(T,Tchains){
+    var cpositions=fchainPositions(T, Tchains);
+    var forkpos=new Object;
+    var forklist=[];
+    
+    for(let k=0;k<Tchains.length;k++){
+        let chain=Tchains[k];
+        let chainParent=chain[0];
+        if (forkpos.hasOwnProperty(chainParent)==false){
+            forkpos[chainParent]=[];
+        }
+    }
+    
+    for(let k=0;k<Tchains.length;k++){
+        let chain=Tchains[k];
+        let chainParent=chain[0];
+        let lastChild=chain[chain.length-1];
+        let  position=cpositions[k][0];
+        let  lastposition=cpositions[k][cpositions[k].length-1];
+        let lastsequence=T.degree_sequence[T.nodeIndex(lastChild)];
+        let lastdegree=lastsequence[lastsequence.length-1];
+        forkpos[chainParent].push(position);
+        if (lastdegree>2){forkpos[lastChild].push(lastposition);}
+        //var fp=Object.keys(forkpos);
+    }
+    
+    var keys=Object.keys(forkpos);
+    for(let k=0;k<keys.length;k++){
+        forklist.push(forkpos[keys[k]]);
+    }
+    return forklist;}
+        
+        
+function getThirdPoint(p1,p2,w){
+    var r1=enorm([p1[0],p1[1]]);
+    var r2=enorm([p2[0],p2[1]]);
+    var theta1=argument([p1[0],p1[1]]);
+    var theta2=argument([p2[0],p2[1]]);
+    var theta=(theta1+theta2)/2;
+    var R=Math.max(r1,r2);
+    var p3=[R*Math.cos(theta),R*Math.sin(theta),w]
+    return p3;
+    }
+        
+//Local Axes -function for animation modified from https://playground.babylonjs.com/#2JKA91#12
+    function localAxes(size, shade) {
+        
+        var pilot_local_axisX = BABYLON.Mesh.CreateLines("pilot_local_axisX",
+            [ new BABYLON.Vector3.Zero(), new BABYLON.Vector3(size, 0, 0)], scene);
+        pilot_local_axisX.color = new BABYLON.Color3(shade, shade, 1);
+
+        
+        var pilot_local_axisY = BABYLON.Mesh.CreateLines("pilot_local_axisY", 
+            [new BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, size, 0)], scene);
+        pilot_local_axisY.color = new BABYLON.Color3(shade, shade, 1);
+
+        
+        var pilot_local_axisZ = BABYLON.Mesh.CreateLines("pilot_local_axisZ", [
+            new BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, 0, size)], scene);
+        pilot_local_axisZ.color = new BABYLON.Color3(1,shade, shade);
+
+	    var local_origin = BABYLON.MeshBuilder.CreateBox("local_origin", {size:1}, scene);
+	    local_origin.isVisible = false;
+	
+	    pilot_local_axisX.parent = local_origin;
+  	    pilot_local_axisY.parent = local_origin;
+  	    pilot_local_axisZ.parent = local_origin; 
+	  
+        return local_origin;
+    }
+        
+    function drawPhylogeneticTree(x0,y0,w,h,T){
+        var $myCanvas = $('#myCanvas')
+        $myCanvas.drawRect({
+              fillStyle: 'black',
+              strokeStyle: 'blue',
+              strokeWidth: 4,
+              x: x0, 
+              y: y0,
+              fromCenter: false,
+              width:w,
+              height:h
+            });
+        
+        $myCanvas.drawArc({
+          strokeStyle: 'red',
+          fillStyle:'red',
+          strokeWidth: 2,
+          x: x0+w/2, 
+          y: y0+h/2,
+          radius: 25,
+          // start and end angles in degrees
+          start: 0, end: 360
+        });
+        
+        $myCanvas.drawArc({
+          strokeStyle: 'white',
+          strokeWidth: 2,
+          x: x0+w/2, 
+          y: y0+h/2,
+          radius: 250,
+          // start and end angles in degrees
+          start: 0, end: 360
+        });
+        
+        for(let k=0;k<T.nodes.length;k++){
+            var x=T.position[k][0];
+            var y=T.position[k][1];
+           
+
+            $myCanvas.drawArc({
+              strokeStyle: 'white',
+              fillStyle:"purple",    
+              strokeWidth:1,
+              x: x+w/2, 
+              y: y+h/2,
+              radius: 3,
+              // start and end angles in degrees
+              start: 0, end: 360
+            });
+        }
+        
+        
+        $('#myCanvas').append($myCanvas);
+    }
+
+    
+    function externalMeshes(w){  //meshes outside level k=w.
+        var emeshes=[];
+        var hstart=0;
+        for(let k=0;k<scene.meshes.length;k++){
+        var mesh = scene.meshes[k];
+        //console.log("mesh.name",mesh.name[11]=="k");    
+        if(mesh.name.length>=6){  
+            if(mesh.name.slice(0,7)=="treearc" || mesh.name.slice(0,6)=="vertex" || mesh.name.slice(0,5)=="lines"){ 
+                for (let j=0;j<mesh.name.length;j++){
+                    if(mesh.name[j]=="k"){
+                        hstart=j;
+                                         }
+                }
+                
+                if(mesh.name.slice(hstart+1,mesh.name.length)!=w){
+                emeshes.push(mesh);}
+             }      
+          }
+        }
+        return emeshes;
+    }
+        
+        
+    function getzcoordinate(instring){
+        var hstart=0;
+        for(let k=0;k<instring.length;k++){
+            if(instring[k]=="k"){
+                hstart=k+1;
+            } 
+        }
+        var zstring=instring.slice(hstart,instring.length);
+        return zstring;
+    }    
+        
+    ////    end functions
+        
+
+
+    d3.csv("mining_data3.csv", function (data) {
+        var targets=[];
+        var obtargets= new Object();
+        var mDates=new Set();
+        var timestamps=new Set;
+        var labels=[];
+        ///////
+        for (var i = 0; i <data.length; i++) {
+            var mdate=data[i]["date"];
+            var ts=data[i]["timestamp"];
+            mDates.add(mdate);
+            timestamps.add(ts);
+            }
+        var stimestamps=Array.from(timestamps);
+        var sDates=Array.from(mDates)
+        stimestamps.sort((a,b)=>b-a);
+        
+        for (let j=0;j<sDates.length;j++){
+            obtargets[sDates[j]]=new Set();
+        }
+        
+        for (let i = 0; i <data.length; i++) {
+            var target= data[i]["target"];
+            var timei=data[i]["timestamp"];
+            var mdatei=data[i]["date"];
+            obtargets[mdatei].add(target);
+            }
+        
+        for (let s=0;s<sDates.length;s++){
+            targets.push(obtargets[sDates[s]]);
+        }
+        
+        
+        ////**********
+        var ndates=40;
+        var separation=50;
+        for(let ltarget=0;ltarget<ndates;ltarget++){
+        
+    
+        var w=separation*ltarget;
+        var T=stringsTree(targets[ltarget]);
+        var array_targets=Array.from(targets[ltarget]);
+        var innerRadius=25;
+        var outerRadius=180;
+        var minAngle=Math.PI/3;
+        var maxAngle=4*Math.PI/3;
+        setupAncestry(T);
+        var Tchains=getChains(T);
+        var an=[];
+        var de=[];
+        for (var k = 0; k <Tchains.length; k++){
+            var tnode=Tchains[k][Tchains[k].length-1];
+            an.push(T.ancestry[T.nodeIndex(tnode)]); 
+            de.push(T.degree_sequence[T.nodeIndex(tnode)]);
+        }
+        var oas=orderedAncestralChains2([an,de]);
+        addCoordinates3(T,Tchains,oas,innerRadius,outerRadius,minAngle,maxAngle);
+        var chainpositions=fchainPositions(T,Tchains);
+        var forkpositions=fforkPositions(T,Tchains);
+      
+    camera.attachControl(canvas, true);
+    var light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene);
+
+    BABYLON.Effect.ShadersStore["customVertexShader"]= "\r\n"+   
+		"precision highp float;\r\n"+
+
+    	"// Attributes\r\n"+
+    	"attribute vec3 position;\r\n"+
+    	"attribute vec2 uv;\r\n"+
+
+    	"// Uniforms\r\n"+
+    	"uniform mat4 worldViewProjection;\r\n"+
+        "uniform float u_time;\r\n"+
+
+    	"// Varying\r\n"+
+    	"varying vec2 vUV;\r\n"+
+
+    	"void main(void) {\r\n"+
+        "vec3 pos1=vec3(1.0,2.0,sin(u_time));\r\n"+
+        "vec3 pos=pos1+position;\r\n"+
+    	"    gl_Position = worldViewProjection * vec4(pos, 1.0);\r\n"+
+
+    	"    vUV = uv;\r\n"+
+    	"}\r\n";
+        
+
+        
+    BABYLON.Effect.ShadersStore["customFragmentShader"]="\r\n"+
+	   "precision highp float;\r\n"+
+    	"varying vec2 vUV;\r\n"+
+    	"uniform sampler2D textureSampler;\r\n"+
+
+    	"void main(void) {\r\n"+
+    	"    gl_FragColor = texture2D(textureSampler, vUV);\r\n"+
+    	"}\r\n";
+        
+     
+        
+    var shaderMaterial = new BABYLON.ShaderMaterial("shader", scene, {
+        vertex: "custom",
+        fragment: "custom",
+	    },
+        {
+			attributes: ["position", "normal", "uv"],
+			uniforms: ["u_time","world", "worldView", "worldViewProjection", "view", "projection"]
+        });
+              
+    // exterior circle   
+    const f = new BABYLON.Vector3(20, 0, w).scale(1);
+    const s = new BABYLON.Vector3(0, 20, w).scale(1);
+    const s2 = new BABYLON.Vector3(0, -20, w).scale(1);
+    const t = new BABYLON.Vector3(-20, 0, w).scale(1);
+    const arc = BABYLON.Curve3.ArcThru3Points(f, s, t);
+    const arcLine = BABYLON.MeshBuilder.CreateLines("arc"+w, {points: arc.getPoints()})
+    
+    const arc2 = BABYLON.Curve3.ArcThru3Points(f, s2, t);
+    const arcLine2 = BABYLON.MeshBuilder.CreateLines("arc"+w, {points: arc2.getPoints()})
+    const O = new BABYLON.Vector3(0, 0, w);   
+    const sphereO = BABYLON.MeshBuilder.CreateSphere("F"+w, {diameter:1});
+      
+    /*
+    sphereO.position =O ;
+    sphereO.material = new BABYLON.StandardMaterial("");
+    sphereO.material.diffuseColor = BABYLON.Color3.Red(); 
+    */
+            
+            
+    //end of exterior circle      
+
+    var mainTexture = new BABYLON.Texture("images/21e8OnSphere.png", scene);
+    shaderMaterial.setTexture("textureSampler", mainTexture);
+    shaderMaterial.backFaceCulling = false;
+
+    var texture2 = new BABYLON.Texture("images/21e8onSphere.png", scene);
+    shaderMaterial.setTexture("textureSampler", texture2);    
+    shaderMaterial.backFaceCulling = false;
+     
+ 
+   //create tree vertices
+    for (let i=0;i<chainpositions.length;i++){ 
+        for(let k=0;k<chainpositions[i].length;k++){        
+            var sp = BABYLON.MeshBuilder.CreateSphere("vertexi"+i+"j"+k+"k"+w,{}, scene);
+            sp.material = shaderMaterial;
+            sp.position.x=parseFloat(chainpositions[i][k][0])/10-1;
+            sp.position.y=parseFloat(chainpositions[i][k][1])/10-2;
+            sp.position.z=w;
+            }
+    }
+        
+    //create labels
+        
+    var anchor = new BABYLON.AbstractMesh("anchor", scene);
+    var manager = new BABYLON.GUI.GUI3DManager(scene);
+   // var labels=[]
+  
+    for (let i=0;i<chainpositions.length;i++){ 
+        for(let j=0;j<chainpositions[i].length;j++){ 
+            var button = new BABYLON.GUI.Button3D("button"+"i"+i+"j"+k+"k"+w);
+            manager.addControl(button);
+            button.linkToTransformNode(anchor);
+            button.node.position=new BABYLON.Vector3(parseFloat(chainpositions[i][j][0])/10,parseFloat(chainpositions[i][j][1])/10,0.5+w);
+            button.scaling = new BABYLON.Vector3(0.3,0.3,0.3); 
+            button.node.rotation.y= Math.PI; 
+            var buttonParent=scene.getNodeByName("vertexi"+i+"j"+k+"k"+w);
+            button.parent=buttonParent;
+            var text1 = new BABYLON.GUI.TextBlock();
+            text1.text =Tchains[i][j];
+            text1.color= "white";
+            text1.fontSize = 24;
+            button.content = text1; 
+            button.onPointerUpObservable.add(function(){
+            alert("target: "+Tchains[i][j]);  }); 
+            manager.addControl(button);
+            labels.push(button);
+            }
+    }
+    
+
+             
+        
+    //title button with information    
+    var advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");    
+    var button1 = BABYLON.GUI.Button.CreateSimpleButton("but1", "21E8 Target Phylogenetic Trees");
+    button1.width = "300px"
+    button1.height = "40px";
+    button1.color = "darkgreen";
+    button1.top = "-300px";
+    button1.left = "-600px";    
+    button1.cornerRadius = 20;
+    button1.background = "darkblue";
+    button1.children[0].color = "#DFF9FB";    
+    //button1.node.position.x=10;    
+    button1.onPointerUpObservable.add(function() {
+        alert("Basic Information:");
+    });
+    advancedTexture.addControl(button1);   
+        
+    //link to stochastic processes analysis    
+    var advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");    
+    var button1 = BABYLON.GUI.Button.CreateSimpleButton("but2", "Stochastic Processes Analysis ");
+    button1.width = "300px"
+    button1.height = "40px";
+    button1.color = "darkgreen";
+    button1.top = "300px";
+    button1.left = "-600px";    
+    button1.cornerRadius = 20;
+    button1.background = "darkblue";
+    button1.children[0].color = "#DFF9FB";    
+    //button1.node.position.x=10;    
+    button1.onPointerUpObservable.add(function() {
+        alert("Basic Information:");
+    });
+    advancedTexture.addControl(button1);  
+     
+    // see https://playground.babylonjs.com/#LGKV0P#1        
+    // add buttons
+    var buttonbox = document.createElement('div');
+    buttonbox.id = "buttonbox";
+    buttonbox.style.position = "absolute";
+    buttonbox.style.top = "60px";
+    buttonbox.style.left = "85%";
+    buttonbox.style.border = "5pt inset blue";
+    buttonbox.style.padding = "2pt";
+    buttonbox.style.paddingRight = "2pt";
+    buttonbox.style.width = "10em";
+    buttonbox.style.display = "block";
+    document.body.appendChild(buttonbox);
+            
+    var tTag = document.createElement('div');
+    tTag.id = "choose";
+    tTag.textContent = "level view";
+    tTag.style.textAlign = "center";
+    tTag.style.border = "2pt solid gold";
+    tTag.style.marginLeft = "1.5pt";
+    tTag.style.marginTop = "3pt";
+    tTag.style.marginBottom = "2pt";
+    tTag.style.backgroundColor = "dodgerblue";
+    tTag.style.width = "96%";
+    tTag.style.fontSize = "1.0em";
+    tTag.style.color = "white";
+    buttonbox.appendChild(tTag);
+            
+    var b14 = document.createElement('button');
+    b14.id = "ShowHidemyMeshesOne";
+    b14.textContent = "on/off";
+    b14.style.display = "block";
+    b14.style.width = "100%";
+    b14.style.fontSize = "1.1em";
+    buttonbox.appendChild(b14);
+            
+    /*b14.onclick = function() {
+        var em=externalMeshes(separation*3);
+       console.log("slider",slider.value);  
+        for(let i=0;i<em.length;i++){
+          if (em[i].isEnabled()==true){em[i].setEnabled(false);}else{em[i].setEnabled(true);}  
+        }
+        for(let j=0;j<labels.length;j++){
+            if(parseInt(getzcoordinate(labels[j].name))!=w){
+          if (labels[j].isVisible==true){labels[j].isVisible=false;}else{labels[j].isVisible=true;} 
+} 
+        }   
+    } */       
+            
+            
+    // control grid     
+    var grid = new BABYLON.GUI.Grid();
+    advancedTexture.addControl(grid);
+    grid.addColumnDefinition(0.25);
+    grid.addColumnDefinition(0.25);
+    grid.addColumnDefinition(0.25);
+    grid.addRowDefinition(0.25);
+    grid.top="50px";
+         
+    var slider = new BABYLON.GUI.Slider();        
+    var addSlider = function(isVertical, isClamped, displayThumb, row, col) {
+    var panel = new BABYLON.GUI.StackPanel();
+    panel.width = "220px";
+    grid.addControl(panel, row, col);
+
+    var header = new BABYLON.GUI.TextBlock();
+    header.text = "level / day";
+    header.height = "30px";
+    header.color = "white";
+    panel.addControl(header);
+
+    //var slider = new BABYLON.GUI.Slider();
+    slider.minimum = 0;
+    slider.maximum =ndates-1;
+    slider.isThumbClamped = isClamped;
+    slider.isVertical = isVertical;
+    slider.displayThumb = displayThumb;
+    if (isVertical) {
+        slider.width = "20px";
+        slider.height = "200px";
+    } else {
+        slider.height = "20px";
+        slider.width = "200px";
+
+    }
+    slider.step=1; 
+    slider.color = "red";
+    slider.onValueChangedObservable.add(function(value) {
+        header.text = "level / day: " + value;
+        camera.position=new BABYLON.Vector3(0,0,separation*(parseInt(slider.value)+1));
+        camera.attachControl(canvas, true);
+        
+        
+        for(let k=0;k<scene.meshes.length;k++){
+          scene.meshes[k].setEnabled(true);
+        }
+        
+        for(let k=0;k<labels.length;k++){
+          labels[k].isVisible=true;
+        }
+        
+        
+        var em=externalMeshes(separation*parseInt(slider.value));
+        b14.onclick = function(value) {
+       console.log("slider",slider.value);  
+        for(let i=0;i<em.length;i++){
+          if (em[i].isEnabled()==true){em[i].setEnabled(false);}else{em[i].setEnabled(true);}
+            
+        }
+        for(let j=0;j<labels.length;j++){
+            if(parseInt(getzcoordinate(labels[j].name))!=separation*parseInt(slider.value)){
+          if (labels[j].isVisible==true){labels[j].isVisible=false;}else{labels[j].isVisible=true;} 
+} 
+        }   
+    }
+        
+        
+        
+        
+        
+    });
+
+    slider.value =0;//Math.PI + Math.random() * Math.PI;
+    panel.addControl(slider);
+}
+    addSlider(false, true, true,2, 10);
+           
+            
+
+    // join chain nodes    
+    var linePositions=[];
+    for (let i=0;i<chainpositions.length;i++){ 
+           linePositions.push([]);
+       }
+        
+    for (let i=0;i<chainpositions.length;i++){ 
+        for(let j=0;j<chainpositions[i].length;j++){        
+            let name="vertexi"+i+"j"+j+"k"+w;
+            let newnode= scene.getNodeByName(name);
+            let vpos=newnode.position;
+            let v=new BABYLON.Vector3(vpos.x+1,vpos.y+2,w);
+            linePositions[i].push(v);
+            }
+    }  
+         
+    for (let i=0;i<linePositions.length;i++){   
+    var lines = BABYLON.MeshBuilder.CreateLines("lines"+i+"k"+w, {points: linePositions[i]});
+    }
+      
+
+        
+        
+    // join forks
+            
+    
+   for (let i=0;i<forkpositions.length;i++){ //forkpositions.length
+        var fork=orderedPositions(forkpositions[i]);
+        for(let j=1;j<fork.length;j++){ //fork.length
+            let p=[fork[j][0]/10,fork[j][1]/10,w];
+            let q=[fork[j-1][0]/10,fork[j-1][1]/10,w];
+            let r=getThirdPoint(p,q,w);
+            let P = new BABYLON.Vector3(p[0],p[1],p[2]);
+            let Q = new BABYLON.Vector3(q[0],q[1],q[2]);
+            let R = new BABYLON.Vector3(r[0],r[1],r[2]);
+            const forkarc = BABYLON.Curve3.ArcThru3Points(Q, R, P);
+            const forkline = BABYLON.MeshBuilder.CreateLines("treearci"+i+"j"+j+"k"+w, {points: forkarc.getPoints()});
+        } 
+    } 
+            
+    const lampLight = new BABYLON.SpotLight("lampLight",new BABYLON.Vector3(0,0,10), new BABYLON.Vector3(0,0,0),2*Math.PI, 0.5, scene);
+    lampLight.diffuse = BABYLON.Color3.Yellow();
+     
+    
+    
+   
+    
+    
+    for (var k = 0; k < scene.meshes.length; k++) {
+var mesh = scene.meshes[k]
+//console.log("mesh name",mesh.name); //.slice(1,3)
+}
+
+       
+            
+   	/* /GROUND
+       var ground = BABYLON.Mesh.CreateGround("ground",200,200,0, scene);
+        var material = new BABYLON.StandardMaterial(scene);
+        material.alpha = .5;
+        ground.material = material;
+	    ground.receiveShadows = true; 
+        ground.rotation.x=Math.PI/2;
+        ground.position.z=-2;  */  
+    
+   
+  
+        
+    }   
+    ////**********
+        
+     /* Fog
+    scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
+    //BABYLON.Scene.FOGMODE_NONE;
+    //BABYLON.Scene.FOGMODE_EXP;
+    //BABYLON.Scene.FOGMODE_EXP2;
+    //BABYLON.Scene.FOGMODE_LINEAR;
+
+    scene.fogColor = new BABYLON.Color3(0.9, 0.9, 0.85);
+    scene.fogDensity = 0.01;
+
+    //Only if LINEAR
+    //scene.fogStart = 20.0;
+    //scene.fogEnd = 60.0;
+
+    // Skybox
+    var skybox = BABYLON.Mesh.CreateBox("skyBox", 1000.0, scene);
+    var skyboxMaterial = new BABYLON.StandardMaterial("skyBox", scene);
+    skyboxMaterial.backFaceCulling = false;
+    //skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture("textures/skybox", scene);
+    //skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+    skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+    skyboxMaterial.disableLighting = true;
+    skybox.material = skyboxMaterial;
+
+    var alpha = 0;
+    scene.registerBeforeRender(function () {
+
+        scene.fogDensity = Math.cos(alpha)/20;
+        alpha += 0.02;
+
+    });
+    
+    */
+        
+        
+        
+        
+        
+    //create sphere to indicate position of Center of Transformation
+        /*
+        var sphere = BABYLON.MeshBuilder.CreateSphere("Sphere", {diameter:0.5}, scene, true);
+        sphere.material = new BABYLON.StandardMaterial("mat", scene);
+        sphere.material.diffuseColor = new BABYLON.Color3(1, 0, 1);
+        */
+        
+        // create axes for frame of reference of Center of Transformation
+        var CoTAxis = localAxes(separation*ndates, 0);
+        
+        //create box 
+        var faceColors = [];
+        faceColors[0]=BABYLON.Color3.Blue();
+        faceColors[1]=BABYLON.Color3.Red();
+        faceColors[2]=BABYLON.Color3.Green();
+        faceColors[3]=BABYLON.Color3.White();
+        faceColors[4]=BABYLON.Color3.Yellow();
+        faceColors[5] = BABYLON.Color3.Black();
+
+        var options = {
+            faceColors: faceColors
+        };
+
+        var box = BABYLON.MeshBuilder.CreateBox("Box", options, scene, true);
+        
+        //create a Center of Transformation
+        var CoT = new BABYLON.TransformNode("root"); 
+        box.parent = CoT;  //apply to Box
+ 
+        
+        //sphere.parent = CoT; 
+        CoTAxis.parent = CoT;
+        CoT.rotation.y =0; //-Math.PI/2;
+
+        //Animation
+        var angle = 0;
+        scene.registerBeforeRender(function(){
+            CoT.rotation.z = angle;
+            box.position.z=separation*ndates;
+            angle +=0.01;
+        });
+
+
+    });	   //end d3.csv       
+    return scene;
+        
+          
+}
+            
+       
+       const scene = createScene(); 
+        
+        // Register a render loop to repeatedly render the scene
+        engine.runRenderLoop(function () {
+                scene.render();
+        });
+
+        // Watch for browser/canvas resize events
+        window.addEventListener("resize", function () {
+                engine.resize();
+        });
+        
+   
+	</script>
+
+
+   </body>
+
+</html>
